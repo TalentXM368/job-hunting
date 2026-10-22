@@ -1,4 +1,4 @@
-const BASE = ''
+const BASE = '/api'
 
 export async function searchJobs(params) {
   const res = await fetch(`${BASE}/search`, {

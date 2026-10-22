@@ -29,7 +29,7 @@ export default function FilterPanel({ filters, setFilters, meta }) {
 
   const fetchLocSugs = async (q) => {
     try {
-      const res = await fetch(`/suggest/locations?q=${encodeURIComponent(q)}&use_mock=${filters.use_mock}&limit=6`)
+      const res = await fetch(`/api/suggest/locations?q=${encodeURIComponent(q)}&use_mock=${filters.use_mock}&limit=6`)
       const data = await res.json()
       setLocSugs(data.suggestions || [])
     } catch { setLocSugs([]) }
@@ -37,7 +37,7 @@ export default function FilterPanel({ filters, setFilters, meta }) {
 
   const fetchCompanies = async () => {
     try {
-      const res = await fetch('/companies')
+      const res = await fetch('/api/companies')
       const data = await res.json()
       const comps = (data.companies || []).map((c) => c.name || c.slug)
       setCompSugs(comps)

@@ -6,7 +6,7 @@ export default function SearchBar({ value, onChange, onSearch, loading, useMock 
 
   const fetchSuggest = async (q) => {
     try {
-      const res = await fetch(`/suggest/titles?q=${encodeURIComponent(q)}&use_mock=${useMock ?? true}&limit=6`)
+      const res = await fetch(`/api/suggest/titles?q=${encodeURIComponent(q)}&use_mock=${useMock ?? true}&limit=6`)
       const data = await res.json()
       setSuggestions(data.suggestions || [])
     } catch { setSuggestions([]) }
