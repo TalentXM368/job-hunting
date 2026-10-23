@@ -91,7 +91,7 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
         return [j for j in jobs if any(_contains_phrase(j.title, a) for a in alias)]
 
     token_aliases = {
-        "developer": ["developer"],
+        "developer": ["developer", "engineer"],
         "engineer": ["engineer", "developer"],
         "engg": ["engineer", "developer", "engg"],
         "eng": ["engineer", "developer", "eng"],
@@ -99,8 +99,9 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
         "aiml": ["aiml", "ai ml", "ai/ml", "artificial intelligence", "machine learning", "ml", "ai"],
         "ml": ["ml", "machine learning"],
         "ai": ["ai", "artificial intelligence"],
+        "sr": ["sr", "senior"],
     }
-    role_tokens = {"developer", "engineer", "engg", "eng", "engr", "sde", "sre", "analyst", "architect", "scientist", "designer", "manager", "consultant", "specialist", "intern"}
+    role_tokens = {"developer", "engineer", "engg", "eng", "engr", "sde", "sre", "sr", "analyst", "architect", "scientist", "designer", "manager", "consultant", "specialist", "intern"}
     role_token_indices = [index for index, token in enumerate(tokens) if token in role_tokens]
     SKILL_TOKENS = {"python", "java", "go", "javascript", "js", "typescript", "react", "node", "aws", "kubernetes", "k8s", "docker", "sql", "postgres", "redis", "ai", "ml"}
 
@@ -151,7 +152,13 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
             return 0.9
 
         # Only if title-level hits are too weak do we consider description text.
-        desc_hits = [any(hay_contains_norm(hay_norm, a) for a in alts) for alts in expanded_tokens]
+        # Keep role synonyms title-only. Otherwise a description mentioning
+        # "Python developer" would make every unrelated engineer role match.
+        description_tokens = [
+            [token] if token in role_tokens else token_aliases.get(token, [token])
+            for token in tokens
+        ]
+        desc_hits = [any(hay_contains_norm(hay_norm, a) for a in alts) for alts in description_tokens]
         role_hits = [
             any(hay_contains_norm(tl_norm, a) for a in expanded_tokens[index])
             for index in role_token_indices
@@ -320,6 +327,7 @@ def search(
     jobs_override: list[Job] | None = None,
 ) -> dict[str, Any]:
     defaults = _load_defaults()
+    explicit_exclude_titles = exclude_titles is not None
     if locations is None:
         locations = defaults.get("locations") or []
     if allow_remote is None:
@@ -379,7 +387,9 @@ def search(
         if len(jobs) == 0 and before > 0 and title.strip():
             pass
 
-    exc = exclude_titles if apply_exclude else []
+    # An explicit title search is a direct query, so profile exclusions such
+    # as "architect" must not hide its results. Custom exclusions still apply.
+    exc = exclude_titles if apply_exclude and (explicit_exclude_titles or not title.strip()) else []
     cfg = {
         "include_titles": [r"."] if not apply_include else include_titles if include_titles else [r"."],
         "exclude_titles": exc,

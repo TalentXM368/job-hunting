@@ -14,6 +14,14 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
+def test_routes_also_served_under_api_prefix():
+    # Vercel forwards /api/search unchanged; it must not 404.
+    assert client.get("/api/health").status_code == 200
+    r = client.post("/api/search", json={"title": "Backend Engineer", "use_mock": True})
+    assert r.status_code == 200
+    assert "jobs" in r.json()
+
+
 def test_companies():
     r = client.get("/companies")
     assert r.status_code == 200

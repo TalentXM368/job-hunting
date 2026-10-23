@@ -42,6 +42,26 @@ def test_python_developer_search_does_not_match_unrelated_engineering_roles():
     assert [job.title for job in result] == ["Python Developer"]
 
 
+def test_developer_query_matches_engineer_title_without_description_role_leak():
+    jobs = [
+        make_job("Python Engineer", description="Python backend role"),
+        make_job("Infrastructure Engineer", description="We are looking for a Python Developer."),
+    ]
+    result = apply_title_filter(jobs, "python developer")
+    assert [job.title for job in result] == ["Python Engineer"]
+
+
+def test_explicit_title_search_is_not_removed_by_default_profile_exclusions():
+    jobs = [make_job("Sr. Solutions Architect", location="Bengaluru, India")]
+    result = search(
+        title="Sr. Solutions Architect",
+        jobs_override=jobs,
+        locations=[],
+        max_age_days=None,
+    )
+    assert [job["title"] for job in result["jobs"]] == ["Sr. Solutions Architect"]
+
+
 def test_aiml_engg_query_matches_ai_ml_titles_only():
     jobs = [
         make_job("AI/ML Engineer", description="Build ML systems"),

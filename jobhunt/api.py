@@ -10,6 +10,28 @@ from .search_service import _load_companies, _load_defaults, search
 
 app = FastAPI(title="JobHunt API", version="1.0.0")
 
+
+class StripApiPrefix:
+    """Serve every route at both /x and /api/x.
+
+    On Vercel the request arrives as /api/search. The request.path transform in
+    vercel.json is meant to strip the prefix but is not applied, so FastAPI saw
+    /api/search and returned 404. Locally the Vite proxy strips it instead.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] in ("http", "websocket"):
+            path = scope["path"]
+            if path == "/api" or path.startswith("/api/"):
+                scope = dict(scope, path=path[4:] or "/", raw_path=(path[4:] or "/").encode())
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(StripApiPrefix)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
