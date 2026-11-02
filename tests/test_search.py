@@ -97,6 +97,28 @@ def test_role_query_description_only_matches_are_labelled_related_not_exact():
     assert len(result["jobs"]) == 2
 
 
+def test_related_tier_prefers_roles_whose_description_mentions_the_skill():
+    # No title says "python", so this is a related match. Engineering roles
+    # that ask for Python in the JD must come first, and roles that never
+    # mention it must not pad the list when skilled ones exist.
+    jobs = [
+        make_job("Frontend Engineer", description="React and TypeScript only."),
+        make_job("Backend Engineer, Payments", description="Python services. Python testing. Python tooling."),
+        make_job("Infrastructure Engineer", description="Go and Python for automation."),
+        make_job("Engineering Manager", description="Lead a team shipping Java."),
+    ]
+    result = search(title="python developer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "related"
+    assert [j["title"] for j in result["jobs"]] == ["Backend Engineer, Payments", "Infrastructure Engineer"]
+
+
+def test_related_tier_falls_back_to_all_same_family_roles_when_none_mention_the_skill():
+    jobs = [make_job("Frontend Engineer", description="React"), make_job("Platform Engineer", description="Go")]
+    result = search(title="python developer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "related"
+    assert len(result["jobs"]) == 2
+
+
 def test_fuzzy_tier_tolerates_typos_in_title_query():
     jobs = [make_job("Backend Engineer"), make_job("Frontend Engineer"), make_job("Data Analyst")]
     result = search(title="backnd enginer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)

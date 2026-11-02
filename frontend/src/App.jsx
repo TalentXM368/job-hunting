@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { searchJobs } from './api'
 import JobHuntingMark from './JobHuntingMark'
 import FilterPanel from './components/FilterPanel'
@@ -100,6 +100,14 @@ export default function App() {
       setLoading(false)
     }
   }
+
+  // Once a search has run, changing any filter re-runs it from the first page
+  // so the list reflects the new filters without pressing Search again.
+  const skipFilterEffect = useRef(true)
+  useEffect(() => {
+    if (skipFilterEffect.current) { skipFilterEffect.current = false; return }
+    if (meta) doSearch(0)
+  }, [filters]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const searched = Boolean(meta) || loading
   const boardsCount = meta?.per_board ? Object.keys(meta.per_board).length : null

@@ -4,6 +4,14 @@ import AutoSuggest from './AutoSuggest'
 const EMP_TYPES = ['Full-time', 'Part-time', 'Contract', 'Internship', 'Volunteer']
 const EXPERIENCE_LEVELS = ['Any experience', 'Internship', 'Entry level', 'Associate', 'Mid-Senior', 'Director']
 const SALARY_OPTIONS = ['Any salary', '$80k+', '$120k+', '$160k+', '$200k+']
+const DATE_OPTIONS = [
+  { label: 'Any time', value: null },
+  { label: 'Past 24 hours', value: 1 },
+  { label: 'Past 3 days', value: 3 },
+  { label: 'Past 7 days', value: 7 },
+  { label: 'Past 14 days', value: 14 },
+  { label: 'Past 30 days', value: 30 },
+]
 
 function Chevron() {
   return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
@@ -86,7 +94,10 @@ export default function FilterPanel({ filters, setFilters, onReset }) {
   const locCount = filters.locations?.length || 0
   const empCount = filters.employment_types?.length || 0
   const compCount = filters.companies?.length || 0
-  const hasAny = locCount || empCount || compCount || filters.allow_remote || filters.max_age_days != null
+  const dateActive = filters.max_age_days != null
+  const dateLabel = DATE_OPTIONS.find((o) => o.value === filters.max_age_days)?.label || `Past ${filters.max_age_days} days`
+  const setDate = (value) => { setFilters((f) => ({ ...f, max_age_days: value })); closeMenu() }
+  const hasAny = locCount || empCount || compCount || filters.allow_remote || dateActive
 
   return (
     <div ref={barRef}>
@@ -136,17 +147,29 @@ export default function FilterPanel({ filters, setFilters, onReset }) {
           Remote
         </button>
 
-        <select
-          className={`jh-chip ${filters.max_age_days != null ? 'active' : ''}`}
-          value={filters.max_age_days ?? ''}
-          onChange={(e) => setFilters((f) => ({ ...f, max_age_days: e.target.value === '' ? null : Number(e.target.value) }))}
-          aria-label="Date posted"
-        >
-          <option value="">Any time</option>
-          <option value={30}>Past 30 days</option>
-          <option value={14}>Past 14 days</option>
-          <option value={7}>Past 7 days</option>
-        </select>
+        {/* Date posted */}
+        <div className="jh-menu-anchor">
+          <button className={`jh-chip ${dateActive ? 'active' : ''}`} onClick={() => toggleMenu('date')} aria-label="Date posted">
+            {dateActive ? dateLabel : 'Date posted'} <Chevron />
+          </button>
+          {openMenu === 'date' && (
+            <div className="jh-menu" style={{ width: 220 }}>
+              <div className="jh-menu-body">
+                <p className="jh-menu-label">Show roles posted in the</p>
+                {DATE_OPTIONS.map((o) => (
+                  <label key={o.label} className="jh-check">
+                    <input
+                      type="radio"
+                      name="jh-date-posted"
+                      checked={(filters.max_age_days ?? null) === o.value}
+                      onChange={() => setDate(o.value)}
+                    /> {o.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
 
         {/* Job type */}
         <div className="jh-menu-anchor">
@@ -224,8 +247,14 @@ export default function FilterPanel({ filters, setFilters, onReset }) {
         </select>
       </div>
 
-      {(locCount > 0 || compCount > 0 || empCount > 0) && (
+      {(locCount > 0 || compCount > 0 || empCount > 0 || dateActive) && (
         <div className="jh-tags">
+          {dateActive && (
+            <span className="jh-tag">
+              <span className="jh-tag-kind">Posted</span> {dateLabel}
+              <button className="jh-tag-x" onClick={() => setDate(null)} aria-label="Remove date filter"><Close /></button>
+            </span>
+          )}
           {filters.locations.map((loc) => (
             <span key={`l-${loc}`} className="jh-tag">
               <span className="jh-tag-kind">Location</span> {loc}

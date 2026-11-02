@@ -272,6 +272,28 @@ def title_search(jobs: list[Job], title: str) -> tuple[list[Job], str]:
 
     # ---- Tier 3: related ---------------------------------------------------
     if f_role_indices:
+        # Real career boards almost never title a role "Python Developer";
+        # they post "Software Engineer, X" and ask for Python in the JD. So
+        # among same-family roles, prefer the ones whose description mentions
+        # every non-role query word, ranked by how often it is mentioned.
+        non_role_tokens = [t for i, t in enumerate(f_tokens) if i not in f_role_indices]
+        if non_role_tokens and related:
+            def skill_mentions(j: Job) -> int:
+                hay = re.sub(r"[^a-z0-9]+", " ", (j.description or "").lower()).strip()
+                words = hay.split()
+                counts = []
+                for tok in non_role_tokens:
+                    n = 0
+                    for a in fuzzy_aliases.get(tok, [tok]):
+                        n += words.count(a) if " " not in a else f" {hay} ".count(f" {a} ")
+                    if n == 0:
+                        return 0
+                    counts.append(n)
+                return min(counts)
+            skilled = [(m, s, j) for s, j in related if (m := skill_mentions(j)) > 0]
+            if skilled:
+                skilled.sort(key=lambda x: (x[1], x[0]), reverse=True)
+                return [j for _, _, j in skilled], "related"
         related.sort(key=lambda x: x[0], reverse=True)
         return [j for _, j in related], ("related" if related else "none")
 

@@ -4,7 +4,7 @@ const EXAMPLES = ['Backend Engineer', 'Site Reliability Engineer', 'Platform Eng
 
 const BANNER = {
   fuzzy: (q) => <>No exact title match for <b>“{q}”</b>. Showing close matches, including typos and partial titles.</>,
-  related: (q) => <>No close title match for <b>“{q}”</b>. Showing related roles instead.</>,
+  related: (q) => <>No roles are titled <b>“{q}”</b> on the boards we track. Showing related roles whose posting mentions your keywords, most relevant first.</>,
 }
 
 function InfoIcon() {
