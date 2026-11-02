@@ -1,6 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 
-export default function AutoSuggest({ value, onSelect, onFetch, placeholder, suggestions, icon }) {
+function SearchGlyph() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+  )
+}
+
+// `inline` renders the list in normal flow (for use inside scrolling menus)
+// instead of as an absolutely positioned overlay.
+export default function AutoSuggest({ value, onSelect, onFetch, onSubmit, placeholder, suggestions, icon, trailing, heading, autoFocus, inline }) {
   const [open, setOpen] = useState(false)
   const [highlight, setHighlight] = useState(-1)
   const wrapRef = useRef(null)
@@ -27,39 +35,57 @@ export default function AutoSuggest({ value, onSelect, onFetch, placeholder, sug
   const choose = (s) => {
     onSelect(s)
     setOpen(false)
+    setHighlight(-1)
+    onSubmit?.(s)
   }
 
   const onKeyDown = (e) => {
-    if (!open || !suggestions?.length) return
+    const hasList = open && suggestions?.length > 0
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      // Enter on a highlighted row picks it; otherwise search what was typed.
+      if (hasList && highlight >= 0) choose(suggestions[highlight])
+      else { setOpen(false); onSubmit?.(value) }
+      return
+    }
+    if (e.key === 'Escape') { setOpen(false); e.currentTarget.blur(); return }
+    if (!hasList) return
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight((h) => Math.min(h + 1, suggestions.length - 1)) }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, 0)) }
-    else if (e.key === 'Enter' && highlight >= 0) { e.preventDefault(); choose(suggestions[highlight]) }
-    else if (e.key === 'Escape') setOpen(false)
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight((h) => Math.max(h - 1, -1)) }
   }
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative', flex: 1 }}>
-      <div style={{ position: 'relative' }}>
-        {icon && <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--li-muted)' }}>{icon}</span>}
-        <input
-          value={value}
-          onChange={handleChange}
-          onFocus={handleFocus}
-          onKeyDown={onKeyDown}
-          placeholder={placeholder}
-          style={{ width: '100%', background: 'var(--li-input, #edf3f8)', border: '1px solid var(--li-border)', borderRadius: 8, padding: icon ? '10px 14px 10px 36px' : '10px 14px', fontSize: 14, outline: 'none', color: 'var(--li-text)' }}
-        />
-      </div>
+    <div ref={wrapRef} className="jh-field">
+      {icon && <span className="jh-field-icon">{icon}</span>}
+      <input
+        className={`jh-input ${icon ? 'has-icon' : ''}`}
+        value={value}
+        onChange={handleChange}
+        onFocus={handleFocus}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        autoFocus={autoFocus}
+        autoComplete="off"
+        spellCheck={false}
+        aria-autocomplete="list"
+        aria-expanded={open && suggestions?.length > 0}
+      />
+      {trailing}
       {open && suggestions && suggestions.length > 0 && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, background: 'var(--li-card)', border: '1px solid var(--li-border)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', zIndex: 20, overflow: 'hidden' }}>
+        <div className={`jh-suggest ${inline ? 'inline' : ''}`} onMouseLeave={() => setHighlight(-1)} role="listbox">
+          {heading && <div className="jh-suggest-head">{heading}</div>}
           {suggestions.map((s, i) => (
             <div
               key={s}
+              role="option"
+              aria-selected={i === highlight}
+              className={`jh-suggest-item ${i === highlight ? 'active' : ''}`}
               onMouseDown={() => choose(s)}
               onMouseEnter={() => setHighlight(i)}
-              style={{ padding: '9px 12px', fontSize: 13, cursor: 'pointer', background: i === highlight ? 'var(--li-bg)' : 'var(--li-card)', color: 'var(--li-text)', borderBottom: i < suggestions.length - 1 ? '1px solid var(--li-border)' : 'none', display: 'flex', alignItems: 'center', gap: 8 }}
             >
-              <span style={{ color: 'var(--li-muted)', fontSize: 12 }}>🔍</span> {s}
+              <SearchGlyph />
+              <span>{s}</span>
+              {i === highlight && <span className="hint">Enter ↵</span>}
             </div>
           ))}
         </div>

@@ -72,13 +72,30 @@ def deduplicate(jobs: list[Job]) -> list[Job]:
 
 
 def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
+    """Title search, results only. See `title_search` for the match mode."""
+    return title_search(jobs, title)[0]
+
+
+def title_search(jobs: list[Job], title: str) -> tuple[list[Job], str]:
+    """Rank jobs against a free-text title query.
+
+    Returns (jobs, mode). Mode tells the caller how confident the match is:
+      "all"      no query, nothing filtered
+      "exact"    strict title match (the only tier that existed before)
+      "fuzzy"    title matched with typo tolerance or on most query words
+      "related"  nothing close; same role family, or query found in the JD
+      "none"     nothing at all
+
+    Each tier only runs when the one above returned nothing, so a precise
+    query never gets diluted with loose matches.
+    """
     if not title or not title.strip():
-        return jobs
+        return jobs, "all"
     q = title.strip().lower()
     q_norm = re.sub(r"[^a-z0-9]+", " ", q).strip()
     tokens = [t for t in q_norm.split() if t]
     if not tokens:
-        return jobs
+        return jobs, "all"
 
     import difflib
 
@@ -88,7 +105,9 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
     }
     alias = q_aliases.get(q_norm)
     if alias:
-        return [j for j in jobs if any(_contains_phrase(j.title, a) for a in alias)]
+        hits = [j for j in jobs if any(_contains_phrase(j.title, a) for a in alias)]
+        if hits:
+            return hits, "exact"
 
     token_aliases = {
         "developer": ["developer", "engineer"],
@@ -100,6 +119,11 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
         "ml": ["ml", "machine learning"],
         "ai": ["ai", "artificial intelligence"],
         "sr": ["sr", "senior"],
+        "golang": ["golang", "go"],
+        "js": ["js", "javascript"],
+        "nodejs": ["nodejs", "node js", "node"],
+        "k8s": ["k8s", "kubernetes"],
+        "postgres": ["postgres", "postgresql"],
     }
     role_tokens = {"developer", "engineer", "engg", "eng", "engr", "sde", "sre", "sr", "analyst", "architect", "scientist", "designer", "manager", "consultant", "specialist", "intern"}
     role_token_indices = [index for index, token in enumerate(tokens) if token in role_tokens]
@@ -140,9 +164,8 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
             if not role_token_indices:
                 return 0.98
 
-        ratio = difflib.SequenceMatcher(None, qn, tl_norm).ratio()
-        if len(qn) >= 4 and ratio >= 0.85:
-            return ratio
+        # Whole-string similarity (typos) is handled by the fuzzy tier below so
+        # that it is labelled as such rather than passed off as an exact hit.
 
         # Strong role match: every meaningful token must be present in the title, with
         # a lightweight synonym map only used at the title level.
@@ -168,6 +191,7 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
 
         return 0.0
 
+    # ---- Tier 1: strict title match -------------------------------------
     scored = []
     for j in jobs:
         s = score_title(j)
@@ -175,10 +199,84 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
             scored.append((s, j))
     if scored:
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [j for _, j in scored]
-    if role_token_indices:
-        return []
+        return [j for _, j in scored], "exact"
 
+    # ---- Tier 2: fuzzy title match ----------------------------------------
+    # Tolerates typos ("enginer", "devloper") and partial queries ("backend
+    # python engineer" -> "Backend Engineer"). Still title-only, so a JD that
+    # merely mentions the query cannot pull in an unrelated role.
+    fuzzy_aliases = dict(token_aliases)
+    fuzzy_aliases.setdefault("sde", ["sde", "software development engineer", "software engineer"])
+    fuzzy_aliases.setdefault("sre", ["sre", "site reliability engineer"])
+    FUZZY_TOKEN_MIN = 0.8      # per-word similarity that counts as "same word"
+    FUZZY_WHOLE_MIN = 0.75     # whole-query similarity against the whole title
+
+    def canonical_role(tok: str) -> str | None:
+        """'enginer' -> 'engineer', so a typo'd role word still counts as one."""
+        if tok in role_tokens:
+            return tok
+        if len(tok) >= 4:
+            for r in role_tokens:
+                if len(r) >= 4 and difflib.SequenceMatcher(None, tok, r).ratio() >= FUZZY_TOKEN_MIN:
+                    return r
+        return None
+
+    f_tokens = [canonical_role(t) or t for t in tokens]
+    f_role_indices = [i for i, t in enumerate(f_tokens) if t in role_tokens]
+
+    def token_score(tok: str, tl_norm: str, tl_tokens: list[str]) -> float:
+        best = 0.0
+        for a in fuzzy_aliases.get(tok, [tok]):
+            if " " in a:
+                if f" {a} " in f" {tl_norm} ":
+                    return 1.0
+                continue
+            for t in tl_tokens:
+                if t == a:
+                    return 1.0
+                # Short words ("go", "ai", "c") are too easy to confuse; only
+                # fuzz words long enough for a typo to be unambiguous.
+                if len(a) >= 4 and len(t) >= 4:
+                    best = max(best, difflib.SequenceMatcher(None, a, t).ratio())
+        return best if best >= FUZZY_TOKEN_MIN else 0.0
+
+    def fuzzy_profile(j: Job) -> tuple[list[float], float]:
+        tl_norm = re.sub(r"[^a-z0-9]+", " ", j.title.lower()).strip()
+        scores = [token_score(t, tl_norm, tl_norm.split()) for t in f_tokens]
+        whole = difflib.SequenceMatcher(None, q_norm, tl_norm).ratio()
+        return scores, whole
+
+    non_role_count = len(f_tokens) - len(f_role_indices)
+    fuzzy: list[tuple[float, Job]] = []
+    related: list[tuple[float, Job]] = []
+    for j in jobs:
+        scores, whole = fuzzy_profile(j)
+        matched = sum(1 for s in scores if s > 0)
+        roles_ok = all(scores[i] > 0 for i in f_role_indices)
+        non_role_hits = sum(1 for i, s in enumerate(scores) if s > 0 and i not in f_role_indices)
+        mean = sum(scores) / len(scores)
+
+        if whole >= FUZZY_WHOLE_MIN:
+            fuzzy.append((max(whole, mean), j))
+        elif roles_ok and (non_role_count == 0 or non_role_hits >= 1) and matched / len(f_tokens) >= 0.5:
+            fuzzy.append((mean, j))
+        elif f_role_indices and roles_ok:
+            # Same role family ("developer"/"engineer") but none of the other
+            # words. Kept for Tier 3 so a query like "python developer" with
+            # no Python roles still shows the engineering roles that exist.
+            related.append((mean, j))
+
+    if fuzzy:
+        fuzzy.sort(key=lambda x: x[0], reverse=True)
+        return [j for _, j in fuzzy], "fuzzy"
+
+    # ---- Tier 3: related ---------------------------------------------------
+    if f_role_indices:
+        related.sort(key=lambda x: x[0], reverse=True)
+        return [j for _, j in related], ("related" if related else "none")
+
+    # No role word in the query (e.g. "golang", "kafka"): look for every word
+    # in the title + description instead.
     def hay_contains(hay: str, term: str) -> bool:
         term = term.lower().strip()
         if " " in term:
@@ -193,8 +291,8 @@ def apply_title_filter(jobs: list[Job], title: str) -> list[Job]:
         if all(any(hay_contains(hay_padded, a) for a in token_aliases.get(tok, [tok])) for tok in tokens):
             fallback.append(j)
     if fallback:
-        return fallback[:200]
-    return []
+        return fallback[:200], "related"
+    return [], "none"
 
 
 _SUGGEST_CACHE: dict[str, Any] = {"jobs": None, "ts": 0, "use_mock": None}
@@ -369,8 +467,9 @@ def search(
     deduped = len(jobs)
 
     after_title = None
+    match_mode = "all"
     if title and title.strip():
-        jobs = apply_title_filter(jobs, title)
+        jobs, match_mode = title_search(jobs, title)
         after_title = len(jobs)
 
     if companies_filter:
@@ -422,6 +521,7 @@ def search(
             "scanned": scanned,
             "deduped": deduped,
             "after_title": after_title if after_title is not None else deduped,
+            "match_mode": match_mode,
             "after_prefilter": after_prefilter,
             "total": total,
             "limit": limit,

@@ -84,13 +84,50 @@ def test_search_title_query_overrides_broad_default_title_regexes():
     assert [job["title"] for job in result["jobs"]] == ["Python Developer"]
 
 
-def test_role_query_does_not_fall_back_to_description_only_matches():
+def test_role_query_description_only_matches_are_labelled_related_not_exact():
+    # Neither title contains "python", so these must never pass as an exact or
+    # fuzzy match just because the JD mentions "Python Developer". They may
+    # surface only as same-role-family fallbacks, clearly labelled.
     jobs = [
         make_job("IT Software Engineer, Infrastructure", description="We are looking for a Python Developer to build infrastructure automation."),
         make_job("Platform Engineer", description="Python Developer role supporting platform tooling.")
     ]
     result = search(title="python developer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
-    assert result["jobs"] == []
+    assert result["meta"]["match_mode"] == "related"
+    assert len(result["jobs"]) == 2
+
+
+def test_fuzzy_tier_tolerates_typos_in_title_query():
+    jobs = [make_job("Backend Engineer"), make_job("Frontend Engineer"), make_job("Data Analyst")]
+    result = search(title="backnd enginer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "fuzzy"
+    assert [j["title"] for j in result["jobs"]] == ["Backend Engineer"]
+
+
+def test_fuzzy_tier_matches_most_of_a_longer_query_in_title():
+    jobs = [make_job("Backend Engineer"), make_job("Data Analyst")]
+    result = search(title="backend python engineer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "fuzzy"
+    assert [j["title"] for j in result["jobs"]] == ["Backend Engineer"]
+
+
+def test_exact_matches_are_not_diluted_by_fuzzy_ones():
+    jobs = [make_job("Backend Engineer"), make_job("Backend Enginer Intern", url="https://example.com/2")]
+    result = search(title="backend engineer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "exact"
+    assert [j["title"] for j in result["jobs"]] == ["Backend Engineer"]
+
+
+def test_sde_query_with_no_sde_titles_falls_back_to_software_engineer_roles():
+    jobs = [make_job("Software Engineer II"), make_job("Data Analyst")]
+    result = search(title="SDE", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] in ("fuzzy", "related")
+    assert [j["title"] for j in result["jobs"]] == ["Software Engineer II"]
+
+
+def test_no_title_search_reports_mode_all():
+    result = search(title="", jobs_override=[make_job("Backend Engineer")], apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "all"
 
 
 def test_sde_alias_does_not_match_an_embedded_substring():
