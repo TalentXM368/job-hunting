@@ -1,4 +1,73 @@
-# jobhunt
+# Job Hunting
+
+A recruiter tool. It reads public career boards, matches open roles to each
+candidate's profile, drafts an application kit, and tracks every application
+through recruiter approval.
+
+```
+career boards ─ingest─▶ jobs ─free filters─▶ LLM screen ─▶ matches ─▶ application kit ─▶ approve ─▶ submitted
+(Greenhouse,            (Postgres)  (titles, place,   (score 0–10                (editable)      (recruiter)  (by hand,
+ Lever, Ashby)                       posting age)      per candidate)                                          for now)
+```
+
+## Run the web app
+
+One command starts both the API and the UI. With no `DATABASE_URL` set, the
+API uses an embedded Postgres stored in `server/.data`, so there is nothing
+to install or configure first.
+
+```bash
+cd server && npm install && npm --prefix ../frontend install   # once
+npm run dev:all        # API on http://localhost:8787 + UI on http://localhost:5173
+```
+
+The UI forwards every `/api` call to the API on port 8787. If you start only
+the UI (`cd frontend && npm run dev`), every page will show
+`http proxy error: ECONNREFUSED` until the API is running too
+(`cd server && npm run dev`). The API takes 20–40 seconds to come up against
+Neon; errors in that window are normal.
+
+Open the UI, go to **Boards** and choose **Refresh all boards** to load jobs.
+Then add a candidate, fill in the profile (or upload a resume and extract it),
+set job preferences, and choose **Find matches**.
+
+Everything works with no LLM key: resumes are read with rules, every job gets
+a deterministic rule score (title fit, skills, seniority, blockers), and kits
+start as templates. An LLM key (copy `.env.example` to `.env`) adds the "AI"
+options: in the default `SCORING_MODE=hybrid`, the model re-scores only the
+best few rule-scored jobs per run (`LLM_RESCORE_MAX`, default 10), and the
+"Extract with AI" and "Draft with AI" buttons appear.
+
+| Folder | What it is |
+|---|---|
+| `server/` | TypeScript API (Hono). Kysely for queries, Prisma for migrations only, Neon Postgres in production. `npm test` runs 93 tests with no network or key. |
+| `frontend/` | React + Vite UI: Search, Candidates, Applications, Boards. |
+| `jobhunt/`, `tests/` | The original Python CLI, described in the rest of this file. Kept for reference; the web app no longer uses it. |
+
+### Deploying
+
+`vercel.json` deploys `server/` and `frontend/` as two services. The Vercel
+project needs `DATABASE_URL` and `DATABASE_URL_UNPOOLED` (Neon), an LLM key,
+`BLOB_READ_WRITE_TOKEN` (a Vercel Blob store, for resume files) and
+`CRON_SECRET`. Apply the schema once with
+`cd server && npx prisma migrate deploy`.
+
+**There is no login yet.** Anyone who can open the deployed URL can read and
+change every candidate. Do not put real candidate data on a public deployment
+until authentication is added.
+
+### What is not built
+
+Automatic submission. Approving an application records the recruiter's
+sign-off; the recruiter then applies on the company's site and marks it
+submitted.
+
+---
+
+# The original CLI (Python)
+
+Everything below describes the first version of this project, a single-user
+command-line agent.
 
 A personal job-search agent. It reads public ATS APIs every morning, throws away
 the ~99% that don't fit you, scores what's left against your resume, drafts an

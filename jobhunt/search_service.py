@@ -256,7 +256,11 @@ def title_search(jobs: list[Job], title: str) -> tuple[list[Job], str]:
         non_role_hits = sum(1 for i, s in enumerate(scores) if s > 0 and i not in f_role_indices)
         mean = sum(scores) / len(scores)
 
-        if whole >= FUZZY_WHOLE_MIN:
+        # Whole-string similarity alone is not enough: a shared role word
+        # ("engineer") inflates it, so "react engineer" would match
+        # "Capacity Engineer". At least one non-role query word must also be
+        # found in the title.
+        if whole >= FUZZY_WHOLE_MIN and (non_role_count == 0 or non_role_hits >= 1):
             fuzzy.append((max(whole, mean), j))
         elif roles_ok and (non_role_count == 0 or non_role_hits >= 1) and matched / len(f_tokens) >= 0.5:
             fuzzy.append((mean, j))

@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
+import { listCompanies, suggestLocations } from '../api'
 import AutoSuggest from './AutoSuggest'
 
-const EMP_TYPES = ['Full-time', 'Part-time', 'Contract', 'Internship', 'Volunteer']
-const EXPERIENCE_LEVELS = ['Any experience', 'Internship', 'Entry level', 'Associate', 'Mid-Senior', 'Director']
-const SALARY_OPTIONS = ['Any salary', '$80k+', '$120k+', '$160k+', '$200k+']
+const EMP_TYPES = ['Full-time', 'Part-time', 'Contract', 'Internship']
 const DATE_OPTIONS = [
   { label: 'Any time', value: null },
   { label: 'Past 24 hours', value: 1 },
@@ -55,18 +54,11 @@ export default function FilterPanel({ filters, setFilters, onReset }) {
 
   const toggle = (key) => setFilters((f) => ({ ...f, [key]: !f[key] }))
 
-  const fetchLocSugs = async (q) => {
-    try {
-      const res = await fetch(`/api/suggest/locations?q=${encodeURIComponent(q)}&use_mock=${filters.use_mock}&limit=6`)
-      const data = await res.json()
-      setLocSugs(data.suggestions || [])
-    } catch { setLocSugs([]) }
-  }
+  const fetchLocSugs = async (q) => setLocSugs(await suggestLocations(q, 6))
 
   const fetchCompanies = async () => {
     try {
-      const res = await fetch('/api/companies')
-      const data = await res.json()
+      const data = await listCompanies()
       setCompSugs((data.companies || []).map((c) => c.name || c.slug))
     } catch { setCompSugs([]) }
   }
@@ -225,26 +217,6 @@ export default function FilterPanel({ filters, setFilters, onReset }) {
             </div>
           )}
         </div>
-
-        <span className="jh-toolbar-sep" aria-hidden="true" />
-
-        <select
-          className={`jh-chip ${filters.experience_level && filters.experience_level !== 'Any experience' ? 'active' : ''}`}
-          value={filters.experience_level || 'Any experience'}
-          onChange={(e) => setFilters((f) => ({ ...f, experience_level: e.target.value }))}
-          aria-label="Experience level"
-        >
-          {EXPERIENCE_LEVELS.map((level) => <option key={level} value={level}>{level}</option>)}
-        </select>
-
-        <select
-          className={`jh-chip ${filters.salary_min ? 'active' : ''}`}
-          value={filters.salary_min || 'Any salary'}
-          onChange={(e) => setFilters((f) => ({ ...f, salary_min: e.target.value === 'Any salary' ? null : e.target.value }))}
-          aria-label="Minimum salary"
-        >
-          {SALARY_OPTIONS.map((salary) => <option key={salary} value={salary}>{salary}</option>)}
-        </select>
       </div>
 
       {(locCount > 0 || compCount > 0 || empCount > 0 || dateActive) && (

@@ -119,6 +119,20 @@ def test_related_tier_falls_back_to_all_same_family_roles_when_none_mention_the_
     assert len(result["jobs"]) == 2
 
 
+def test_fuzzy_tier_does_not_match_on_shared_role_word_alone():
+    # "react engineer" vs "Capacity Engineer" scores high on whole-string
+    # similarity only because both end in "engineer". That must not count as
+    # a fuzzy title match; the React role should surface via the related tier.
+    jobs = [
+        make_job("Capacity Engineer", description="Go and networking."),
+        make_job("Research Engineer", description="C++ and CUDA."),
+        make_job("Frontend Engineer", description="React and TypeScript."),
+    ]
+    result = search(title="react engineer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)
+    assert result["meta"]["match_mode"] == "related"
+    assert [j["title"] for j in result["jobs"]] == ["Frontend Engineer"]
+
+
 def test_fuzzy_tier_tolerates_typos_in_title_query():
     jobs = [make_job("Backend Engineer"), make_job("Frontend Engineer"), make_job("Data Analyst")]
     result = search(title="backnd enginer", jobs_override=jobs, apply_exclude=False, locations=[], max_age_days=None)

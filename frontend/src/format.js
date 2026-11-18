@@ -49,6 +49,48 @@ export function atsLabel(ats) {
   return ATS_LABEL[(ats || '').toLowerCase()] || ats || ''
 }
 
+export function formatDateTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return String(iso)
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+export function formatBytes(n) {
+  if (n == null) return ''
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+export function wordCount(text) {
+  const t = (text || '').trim()
+  return t ? t.split(/\s+/).length : 0
+}
+
+// One-item-per-line textareas <-> string arrays.
+export function listToLines(list) {
+  return (list || []).join('\n')
+}
+export function linesToList(text) {
+  return (text || '').split('\n').map((s) => s.trim()).filter(Boolean)
+}
+
+// '' -> null so the API clears the column instead of storing an empty string.
+export function textOrNull(value) {
+  const t = (value ?? '').toString().trim()
+  return t ? t : null
+}
+export function numberOrNull(value) {
+  if (value === '' || value == null) return null
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+export function plural(n, one, many) {
+  return `${n} ${n === 1 ? one : many || `${one}s`}`
+}
+
 // Collapse runs of blank lines so pre-wrapped descriptions don't sprawl.
 export function tidyDescription(text) {
   return (text || '').replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()

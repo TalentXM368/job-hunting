@@ -1,26 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
-import { searchJobs } from './api'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { HashRouter, Link, NavLink, Route, Routes } from 'react-router-dom'
+import { getHealth } from './api'
+import { HealthContext } from './healthContext'
 import JobHuntingMark from './JobHuntingMark'
-import FilterPanel from './components/FilterPanel'
-import JobDetail from './components/JobDetail'
-import JobList from './components/JobList'
-import SearchBar from './components/SearchBar'
+import ApplicationDetailPage from './pages/ApplicationDetailPage'
+import ApplicationsPage from './pages/ApplicationsPage'
+import BoardsPage from './pages/BoardsPage'
+import CandidateDetailPage from './pages/CandidateDetailPage'
+import CandidatesPage from './pages/CandidatesPage'
+import NewCandidatePage from './pages/NewCandidatePage'
+import SearchPage from './pages/SearchPage'
 
-const EMPTY_FILTERS = {
-  locations: [],
-  allow_remote: false,
-  max_age_days: null,
-  ats: [],
-  companies: [],
-  employment_types: [],
-  use_mock: false,
-  apply_include: false,
-  apply_exclude: true,
-  include_titles: [],
-  exclude_titles: [],
-}
-
-const EXAMPLES = ['Backend Engineer', 'Site Reliability Engineer', 'Platform Engineer', 'Software Engineer II']
+const NAV = [
+  { to: '/', label: 'Search', end: true },
+  { to: '/candidates', label: 'Candidates' },
+  { to: '/applications', label: 'Applications' },
+  { to: '/boards', label: 'Boards' },
+]
 
 function ThemeIcon({ theme }) {
   return theme === 'light' ? (
@@ -30,177 +26,103 @@ function ThemeIcon({ theme }) {
   )
 }
 
+function NotFound() {
+  return (
+    <main className="jh-wrap rc-page">
+      <div className="jh-panel">
+        <div className="jh-empty">
+          <div className="jh-empty-title">Page not found</div>
+          That address does not match anything here. <Link to="/">Go to search</Link>.
+        </div>
+      </div>
+    </main>
+  )
+}
+
 export default function App() {
-  const [title, setTitle] = useState('')
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light')
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('theme', theme)
   }, [theme])
 
-  // Start with no filters applied; the user picks their own.
-  const [filters, setFilters] = useState(EMPTY_FILTERS)
-  const [jobs, setJobs] = useState([])
-  const [meta, setMeta] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [offset, setOffset] = useState(0)
-  const [selected, setSelected] = useState(null)
-  const [boards, setBoards] = useState(null)
-  const limit = 50
-
-  useEffect(() => {
-    fetch('/api/health').then((r) => r.json()).then((d) => setBoards(d.boards ?? null)).catch(() => {})
-  }, [])
-
-  // Press "/" anywhere to jump to the search box.
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key !== '/' || e.metaKey || e.ctrlKey || e.altKey) return
-      const tag = document.activeElement?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-      e.preventDefault()
-      document.querySelector('.jh-search input')?.focus()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [])
-
-  // `query` lets the search bar pass the text it just submitted, so picking a
-  // suggestion and pressing Enter searches that value rather than stale state.
-  const doSearch = async (nextOffset = 0, query) => {
-    const q = typeof query === 'string' ? query : title
-    if (typeof query === 'string' && query !== title) setTitle(query)
-    setLoading(true)
-    setError(null)
-    setOffset(nextOffset)
+  const [health, setHealth] = useState(null)
+  const [healthError, setHealthError] = useState(null)
+  const reloadHealth = useCallback(async () => {
     try {
-      const data = await searchJobs({
-        title: q,
-        locations: filters.locations,
-        allow_remote: filters.allow_remote,
-        max_age_days: filters.max_age_days,
-        include_titles: filters.include_titles,
-        exclude_titles: filters.exclude_titles?.length ? filters.exclude_titles : undefined,
-        ats: filters.ats,
-        companies: filters.companies?.length ? filters.companies : undefined,
-        employment_types: filters.employment_types?.length ? filters.employment_types : undefined,
-        use_mock: filters.use_mock,
-        apply_include: filters.apply_include,
-        apply_exclude: filters.apply_exclude,
-        limit,
-        offset: nextOffset,
-      })
-      setJobs(data.jobs)
-      setMeta(data.meta)
-      setSelected(data.jobs[0] || null)
+      setHealth(await getHealth())
+      setHealthError(null)
     } catch (e) {
-      setError(e.message)
-    } finally {
-      setLoading(false)
+      setHealthError(e.message)
     }
-  }
+  }, [])
+  useEffect(() => { reloadHealth() }, [reloadHealth])
 
-  // Once a search has run, changing any filter re-runs it from the first page
-  // so the list reflects the new filters without pressing Search again.
-  const skipFilterEffect = useRef(true)
-  useEffect(() => {
-    if (skipFilterEffect.current) { skipFilterEffect.current = false; return }
-    if (meta) doSearch(0)
-  }, [filters]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const searched = Boolean(meta) || loading
-  const boardsCount = meta?.per_board ? Object.keys(meta.per_board).length : null
+  const healthValue = useMemo(
+    () => ({ health, error: healthError, reload: reloadHealth }),
+    [health, healthError, reloadHealth],
+  )
+  const boards = health?.boards ?? null
 
   return (
-    <div className="jh-shell">
-      <header className="jh-header">
-        <div className="jh-wrap jh-header-inner">
-          <a className="jh-brand" href="/">
-            <JobHuntingMark size={36} />
-            <span className="jh-brand-text">
-              <span className="jh-brand-name">Job Hunting</span>
-              <span className="jh-brand-by">A BlockTXM product</span>
-            </span>
-          </a>
-          <div className="jh-header-right">
-            {boards != null && (
-              <span className="jh-header-stat" title="Public career boards this tool reads">
-                <span className="pulse" aria-hidden="true" />
-                {boards} career boards tracked
-              </span>
-            )}
-            <button
-              className="jh-icon-btn"
-              onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
-              title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
-              aria-label="Toggle colour theme"
-            >
-              <ThemeIcon theme={theme} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <section className={`jh-hero ${searched ? 'compact' : ''}`}>
-        <div className="jh-wrap">
-          <div className="jh-hero-inner">
-            <p className="jh-eyebrow">Engineering roles, curated</p>
-            <h1 className="jh-h1">Find roles worth applying to.</h1>
-            <p className="jh-lede">
-              We read the public career pages of {boards ?? 'selected'} companies, remove postings that do not fit, and show you what is left. Nothing is ever submitted on your behalf.
-            </p>
-            <SearchBar value={title} onChange={setTitle} onSearch={(text) => doSearch(0, text)} loading={loading} useMock={filters.use_mock} />
-            <div className="jh-examples">
-              <span>Try</span>
-              {EXAMPLES.map((q) => (
-                <button key={q} className="jh-example" onClick={() => doSearch(0, q)}>{q}</button>
-              ))}
+    <HashRouter>
+      <HealthContext.Provider value={healthValue}>
+        <div className="jh-shell">
+          <header className="jh-header">
+            <div className="jh-wrap jh-header-inner">
+              <Link className="jh-brand" to="/">
+                <JobHuntingMark size={36} />
+                <span className="jh-brand-text">
+                  <span className="jh-brand-name">Job Hunting</span>
+                  <span className="jh-brand-by">A BlockTXM product</span>
+                </span>
+              </Link>
+              <nav className="jh-nav" aria-label="Main">
+                {NAV.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => `jh-nav-link ${isActive ? 'active' : ''}`}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </nav>
+              <div className="jh-header-right">
+                {boards != null && (
+                  <span className="jh-header-stat" title="Public career boards this tool reads">
+                    <span className="pulse" aria-hidden="true" />
+                    {boards} career boards tracked
+                  </span>
+                )}
+                <button
+                  className="jh-icon-btn"
+                  onClick={() => setTheme((t) => (t === 'light' ? 'dark' : 'light'))}
+                  title={`Switch to ${theme === 'light' ? 'dark' : 'light'} mode`}
+                  aria-label="Toggle colour theme"
+                >
+                  <ThemeIcon theme={theme} />
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      </section>
+          </header>
 
-      <div className="jh-wrap jh-toolbar-wrap">
-        <div className="jh-toolbar-card">
-          <FilterPanel filters={filters} setFilters={setFilters} onReset={() => setFilters(EMPTY_FILTERS)} />
-        </div>
-      </div>
+          <Routes>
+            <Route path="/" element={<SearchPage />} />
+            <Route path="/candidates" element={<CandidatesPage />} />
+            <Route path="/candidates/new" element={<NewCandidatePage />} />
+            <Route path="/candidates/:id" element={<CandidateDetailPage />} />
+            <Route path="/candidates/:id/:tab" element={<CandidateDetailPage />} />
+            <Route path="/applications" element={<ApplicationsPage />} />
+            <Route path="/applications/:id" element={<ApplicationDetailPage />} />
+            <Route path="/boards" element={<BoardsPage />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
 
-      <main className="jh-wrap jh-layout">
-        <section className="jh-panel">
-          <div className="jh-panel-head">
-            <span>
-              {meta
-                ? <><strong>{meta.total}</strong> {meta.total === 1 ? 'role' : 'roles'}{title.trim() ? <> for “{title.trim()}”</> : ''}</>
-                : <strong style={{ fontSize: 14 }}>Results</strong>}
-            </span>
-            <span className="sub">
-              {meta ? `${meta.scanned} postings${boardsCount ? ` · ${boardsCount} boards` : ''}` : ''}
-            </span>
-          </div>
-          <JobList
-            jobs={jobs}
-            meta={meta}
-            query={title}
-            loading={loading}
-            error={error}
-            offset={offset}
-            onPage={(o) => doSearch(o)}
-            selected={selected}
-            onSelect={setSelected}
-            onExample={(q) => doSearch(0, q)}
-          />
-        </section>
-        <JobDetail job={selected} />
-      </main>
-
-      <footer className="jh-footer">
-        <div className="jh-wrap jh-footer-inner">
-          <span><strong>Job Hunting</strong> · a BlockTXM product</span>
-          <span>Reads public career boards only. Filters locally. Never applies on your behalf.</span>
+          <footer className="jh-footer">
+            <div className="jh-wrap jh-footer-inner">
+              <span><strong>Job Hunting</strong> · a BlockTXM product</span>
+              <span>Reads public career boards only. Applications are only sent after a recruiter approves them.</span>
+            </div>
+          </footer>
         </div>
-      </footer>
-    </div>
+      </HealthContext.Provider>
+    </HashRouter>
   )
 }

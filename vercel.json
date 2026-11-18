@@ -2,21 +2,9 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "services": {
     "app": {
-      "root": ".",
-      "framework": "fastapi",
-      "entrypoint": "jobhunt.api:app",
-      "routes": [
-        {
-          "src": "/api/(.*)",
-          "transforms": [
-            {
-              "type": "request.path",
-              "op": "set",
-              "args": "/$1"
-            }
-          ]
-        }
-      ]
+      "root": "server",
+      "framework": "hono",
+      "entrypoint": "src/index.ts"
     },
     "frontend": {
       "root": "frontend",
@@ -35,6 +23,12 @@
       "destination": {
         "service": "frontend"
       }
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "30 0 * * 1-5"
     }
   ]
 }

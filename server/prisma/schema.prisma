@@ -1,0 +1,303 @@
+// Database schema for Job Hunting.
+//
+// Prisma is used for migrations only. Queries go through Kysely, whose types
+// are generated from this file by prisma-kysely (see `npm run generate`).
+// Two consequences worth knowing:
+//   - Field names are snake_case on purpose: they are the real column names,
+//     so Kysely queries read exactly like the SQL they produce.
+//   - `updated_at` has no automatic bump. Prisma's @updatedAt only works inside
+//     Prisma Client, which this project does not use. Set it in the UPDATE.
+
+generator kysely {
+  provider     = "prisma-kysely"
+  output       = "../src/db/generated"
+  fileName     = "types.ts"
+  enumFileName = "enums.ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ----------------------------------------------------------------- people --
+
+enum UserRole {
+  admin
+  recruiter
+}
+
+/// A recruiter who signs in. Credential columns are added with the auth choice.
+model User {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email      String   @unique
+  name       String
+  role       UserRole @default(recruiter)
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  candidates            Candidate[]
+  approved_applications Application[]      @relation("application_approver")
+  application_events    ApplicationEvent[]
+
+  @@map("users")
+}
+
+enum CandidateStatus {
+  active
+  paused
+  archived
+}
+
+/// One person a recruiter is placing. Columns here are the facts an
+/// application form asks for; `profile` is the blob the LLM scores against.
+model Candidate {
+  id       String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_id String          @db.Uuid
+  status   CandidateStatus @default(active)
+
+  full_name     String
+  email         String?
+  phone         String?
+  location      String?
+  linkedin_url  String?
+  github_url    String?
+  portfolio_url String?
+
+  current_title    String?
+  current_company  String?
+  years_experience Decimal? @db.Decimal(4, 1)
+  seniority        String?
+
+  work_authorization   String?
+  requires_sponsorship Boolean?
+  willing_to_relocate  Boolean?
+  notice_period_days   Int?
+
+  /// Annual amounts in `salary_currency`.
+  current_salary  Int?
+  expected_salary Int?
+  salary_currency String? @default("INR")
+
+  /// Same shape as profile.example.json: core_skills, domains,
+  /// notable_projects, education, target_titles. Extracted from the resume,
+  /// then edited by the recruiter. This is what screening is scored against.
+  profile Json?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  owner        User                 @relation(fields: [owner_id], references: [id], onDelete: Restrict)
+  resumes      CandidateResume[]
+  preferences  CandidatePreference?
+  matches      Match[]
+  applications Application[]
+
+  @@index([owner_id, status])
+  @@map("candidates")
+}
+
+model CandidateResume {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidate_id   String   @db.Uuid
+  file_name      String
+  mime_type      String
+  size_bytes     Int
+  /// Where the file lives (object storage URL). The file is never in Postgres.
+  storage_url    String
+  /// Plain text pulled from the file, kept for providers that cannot read PDFs.
+  extracted_text String?
+  is_primary     Boolean  @default(false)
+  uploaded_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  candidate    Candidate     @relation(fields: [candidate_id], references: [id], onDelete: Cascade)
+  applications Application[]
+
+  @@index([candidate_id])
+  @@map("candidate_resumes")
+}
+
+/// Per-candidate version of the `filters` block in config.yaml.
+model CandidatePreference {
+  candidate_id String @id @db.Uuid
+
+  target_titles          String[]
+  /// Regexes, same semantics as include_titles / exclude_titles in prefilter.py.
+  include_title_patterns String[]
+  exclude_title_patterns String[]
+  locations              String[]
+  allow_remote           Boolean  @default(true)
+  /// Null disables the freshness gate.
+  max_age_days           Int?     @default(30)
+  score_threshold        Decimal  @default(7.0) @db.Decimal(3, 1)
+
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  candidate Candidate @relation(fields: [candidate_id], references: [id], onDelete: Cascade)
+
+  @@map("candidate_preferences")
+}
+
+// ------------------------------------------------------------------- jobs --
+
+enum Ats {
+  greenhouse
+  lever
+  ashby
+}
+
+/// A career board to poll. Replaces companies.yaml.
+model Company {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  ats  Ats
+  slug String
+  name String
+
+  is_active        Boolean   @default(true)
+  last_fetched_at  DateTime? @db.Timestamptz(6)
+  /// HTTP status of the last poll; a board stuck on 404 is a dead slug.
+  last_http_status Int?
+  last_job_count   Int?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+
+  jobs Job[]
+
+  @@unique([ats, slug])
+  @@map("companies")
+}
+
+model Job {
+  id          String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// "{ats}:{slug}:{id}" as built by the parsers in fetch.py. Dedupe key.
+  external_id String @unique
+  company_id  String @db.Uuid
+
+  title           String
+  location        String    @default("")
+  url             String
+  description     String    @default("")
+  salary          String?
+  employment_type String?
+  posted_at       DateTime? @db.Timestamptz(6)
+
+  first_seen_at DateTime  @default(now()) @db.Timestamptz(6)
+  last_seen_at  DateTime  @default(now()) @db.Timestamptz(6)
+  /// Set when the posting disappears from its board.
+  closed_at     DateTime? @db.Timestamptz(6)
+
+  company      Company       @relation(fields: [company_id], references: [id], onDelete: Cascade)
+  matches      Match[]
+  applications Application[]
+
+  @@index([company_id])
+  @@index([closed_at, posted_at(sort: Desc)])
+  @@map("jobs")
+}
+
+// --------------------------------------------------------------- matching --
+
+enum MatchStatus {
+  new
+  shortlisted
+  dismissed
+}
+
+/// One candidate scored against one job. Also the dedupe record that
+/// seen.json used to be: a (candidate, job) pair is screened once.
+model Match {
+  id           String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidate_id String      @db.Uuid
+  job_id       String      @db.Uuid
+  status       MatchStatus @default(new)
+
+  /// Final 0.0 to 10.0: the LLM's score where it re-scored the job, else the rule score.
+  score       Decimal?  @db.Decimal(3, 1)
+  reason      String?
+  /// What produced `score`: "rules", or "rules+<provider>/<model>" after LLM verification.
+  model       String?
+  /// The free, deterministic score every job gets before any LLM call.
+  rule_score  Decimal?  @db.Decimal(3, 1)
+  rule_reason String?
+  screened_at DateTime? @db.Timestamptz(6)
+  created_at  DateTime  @default(now()) @db.Timestamptz(6)
+
+  candidate   Candidate    @relation(fields: [candidate_id], references: [id], onDelete: Cascade)
+  job         Job          @relation(fields: [job_id], references: [id], onDelete: Cascade)
+  application Application?
+
+  @@unique([candidate_id, job_id])
+  @@index([candidate_id, status, score(sort: Desc)])
+  @@map("matches")
+}
+
+// ----------------------------------------------------------- applications --
+
+enum ApplicationStatus {
+  /// Kit generated, recruiter still editing.
+  draft
+  /// Recruiter approved it; nothing has been sent.
+  approved
+  /// Waiting for the submit worker.
+  queued
+  submitting
+  submitted
+  /// The worker stopped: CAPTCHA, or a required question it could not answer.
+  needs_human
+  failed
+  withdrawn
+}
+
+model Application {
+  id           String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  candidate_id String            @db.Uuid
+  job_id       String            @db.Uuid
+  match_id     String?           @unique @db.Uuid
+  resume_id    String?           @db.Uuid
+  status       ApplicationStatus @default(draft)
+
+  // The application kit, same keys as DRAFT_KEYS in llm.py. Editable.
+  fit_summary      String?
+  tailored_bullets String[]
+  gaps             String[]
+  cover_note       String?
+  questions_to_ask String[]
+
+  approved_by    String?   @db.Uuid
+  approved_at    DateTime? @db.Timestamptz(6)
+  submitted_at   DateTime? @db.Timestamptz(6)
+  failure_reason String?
+  /// Screenshot of the confirmation page, as evidence of what was sent.
+  proof_url      String?
+
+  created_at DateTime @default(now()) @db.Timestamptz(6)
+  updated_at DateTime @default(now()) @db.Timestamptz(6)
+
+  candidate Candidate          @relation(fields: [candidate_id], references: [id], onDelete: Cascade)
+  job       Job                @relation(fields: [job_id], references: [id], onDelete: Restrict)
+  match     Match?             @relation(fields: [match_id], references: [id], onDelete: SetNull)
+  resume    CandidateResume?   @relation(fields: [resume_id], references: [id], onDelete: SetNull)
+  approver  User?              @relation("application_approver", fields: [approved_by], references: [id], onDelete: SetNull)
+  events    ApplicationEvent[]
+
+  @@unique([candidate_id, job_id])
+  @@index([status])
+  @@map("applications")
+}
+
+/// Append-only history of an application: who approved it, what the worker
+/// did, why it stopped. Submitting on someone's behalf needs an audit trail.
+model ApplicationEvent {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  application_id String   @db.Uuid
+  /// Null when the system, not a person, caused the event.
+  actor_id       String?  @db.Uuid
+  type           String
+  detail         Json?
+  created_at     DateTime @default(now()) @db.Timestamptz(6)
+
+  application Application @relation(fields: [application_id], references: [id], onDelete: Cascade)
+  actor       User?       @relation(fields: [actor_id], references: [id], onDelete: SetNull)
+
+  @@index([application_id, created_at])
+  @@map("application_events")
+}
